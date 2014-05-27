@@ -76,8 +76,46 @@ module.exports = function(grunt) {
         if (!body.completed){
           setTimeout(checkStatus ,testInterval);
         } else {
-          testInfo.passed = testInfo.result ? resultParsers[framework](testInfo.result) : false;
-          deferred.resolve(testInfo);
+          // If we exceed the limit (11.5–20.6k of JSON) for reported test data, Sauce Labs
+          // fails to parse it and return it to us nicely. http://support.saucelabs.com/requests/11900
+          // SO, we'll just go through the "Sauce Labs log", find the appropriate request,
+          // and retrieve the test data ourselves.
+          var logRequestParams = {
+            method: 'get',
+            url: 'https://saucelabs.com/rest/v1/' + user + '/jobs/' + jobId + '/assets/log.json',
+            auth: {
+              user: user,
+              pass: key
+            },
+            json: true
+          };
+          rqst(logRequestParams, function(error, response, body){
+            if (error){
+              deferred.resolve({
+                passed: undefined,
+                result: {
+                  message: "Error connecting to api to get test logs: " + error.toString()
+                }
+              });
+              return;
+            }
+            var logs = body;
+
+            // Duck type the right request with what we know about how Sauce Labs retreives the
+            // JSON test data--POSTing an 'execute' command with "return window.global_test_results"--
+            // and pull the data straight from the request.
+            var log, i = logs.length;
+            while (i--) {
+              log = logs[i];
+              if (log.method === 'POST' && log.path === 'execute' && log.result !== null) {
+                testInfo.result = log.result;
+                break;
+              }
+            }
+
+            testInfo.passed = testInfo.result ? resultParsers[framework](testInfo.result) : false;
+            deferred.resolve(testInfo);
+          });
         }
 
       });
@@ -136,16 +174,17 @@ module.exports = function(grunt) {
                     var resultPromise = new TestResult(taskId, me.user, me.key, framework, me.testInterval);
                     addResultPromise(resultPromise);
                     resultPromise.then(function (result) {
-                        var alteredResult = onTestComplete(result);
-                        if (alteredResult !== undefined) {
-                            result.passed = alteredResult;
-                        }
-
                         grunt.log.subhead("\nTested %s", url);
                         grunt.log.writeln("Platform: %s", result.platform);
+                        grunt.log.writeln("Url %s", result.url);
 
                         if (tunnelIdentifier && unsupportedPort(url)) {
                             grunt.log.writeln("Warning: This url might use a port that is not proxied by Sauce Connect.".yellow);
+                        }
+
+                        var alteredResult = onTestComplete(result);
+                        if (alteredResult !== undefined) {
+                            result.passed = alteredResult;
                         }
 
                         if (result.passed === undefined) {
@@ -153,7 +192,6 @@ module.exports = function(grunt) {
                         } else {
                             grunt.log.writeln("Passed: %s", result.passed);
                         }
-                        grunt.log.writeln("Url %s", result.url);
                         taskComplete();
                     }, function (e) {
                         grunt.log.error('some error? %s', e);
