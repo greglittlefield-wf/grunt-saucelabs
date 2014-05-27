@@ -82,7 +82,7 @@ module.exports = function(grunt) {
           // and retrieve the test data ourselves.
           var logRequestParams = {
             method: 'get',
-            url: 'https://saucelabs.com/rest/v1/' + user + '/jobs/' + jobId + '/assets/log.json',
+            url: 'https://saucelabs.com/rest/v1/' + user + '/jobs/' + testInfo.job_id + '/assets/log.json',
             auth: {
               user: user,
               pass: key
